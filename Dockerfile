@@ -38,9 +38,9 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY pyproject.toml ./
 
-# Install Python dependencies
+# Install Python dependencies and build tools
 RUN pip install --upgrade pip && \
-    pip install fastmcp>=2.13.0 pydantic>=2.11.7
+    pip install fastmcp>=2.13.0 pydantic>=2.11.7 hatchling
 
 # Copy application code
 COPY calculator_mcp/ ./calculator_mcp/
