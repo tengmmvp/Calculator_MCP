@@ -26,7 +26,6 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "fastmcp>=2.13.0",
-    "mcp>=1.22.0",
     "pydantic>=2.11.7",
 ]
 

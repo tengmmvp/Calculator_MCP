@@ -11,7 +11,7 @@ import math
 import statistics
 from typing import Any, Dict, List
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 # 创建 FastMCP 实例
