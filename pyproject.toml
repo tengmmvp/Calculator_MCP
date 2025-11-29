@@ -54,7 +54,7 @@ test = [
 ]
 
 [project.scripts]
-calculator-mcp-server = "server:main"
+calculator-mcp-server = "calculator_mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/tengmmvp/Calculator_MCP"
@@ -64,10 +64,10 @@ Repository = "https://github.com/tengmmvp/Calculator_MCP"
 Changelog = "https://github.com/tengmmvp/Calculator_MCP/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
 
 [tool.setuptools.package-dir]
-"" = "src"
+"" = "."
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.yaml", "*.yml"]
