@@ -35,12 +35,13 @@ jobs:
 
       - name: 📦 Install dependencies
         run: |
-          uv sync --dev
+          uv venv
+          uv pip install -e .
 
       - name: 🔍 Test core module imports
         run: |
-          python -c "from calculator_mcp.server import cli_main; print('✅ Core module imports work')"
-          python -c "import calculator_mcp; print('✅ Package imports work')"
+          uv run python -c "from calculator_mcp.server import cli_main; print('✅ Core module imports work')"
+          uv run python -c "import calculator_mcp; print('✅ Package imports work')"
 
       - name: 🏗️ Test package build
         run: |
