@@ -1,0 +1,13 @@
+# MCP dependencies
+fastmcp>=2.13.0
+mcp>=1.22.0
+
+# Math dependencies
+sympy>=1.12.0
+numpy>=1.24.0
+
+# Optional development dependencies
+pytest>=6.0
+pytest-asyncio>=0.18
+black>=21.0
+flake8>=3.8

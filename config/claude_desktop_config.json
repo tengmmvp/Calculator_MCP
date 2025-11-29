@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "calculator": {
+      "command": "uvx",
+      "args": ["git+https://github.com/tengmmvp/Calculator_MCP"],
+      "description": "Mathematical calculator with tools, resources, and prompts",
+      "env": {}
+    }
+  }
+}

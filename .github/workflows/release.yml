@@ -1,0 +1,229 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 1.0.0)"
+        required: true
+        default: "1.0.0"
+      pre_release:
+        description: "Is this a pre-release?"
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      release_id: ${{ steps.create_release.outputs.id }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Update version in files
+        run: |
+          # Update version in setup.py if it exists, or create it
+          if [ ! -f setup.py ]; then
+            cat > setup.py << 'EOF'
+          from setuptools import setup, find_packages
+
+          setup(
+              name="calculator-mcp-server",
+              version="${{ github.event.inputs.version }}",
+              description="A complete Model Context Protocol (MCP) compliant mathematical calculation server",
+              long_description=open("README.md").read(),
+              long_description_content_type="text/markdown",
+              author="Calculator MCP Team",
+              author_email="admin@tengmmvp.cn",
+              url="https://github.com/tengmmvp/Calculator_MCP",
+              packages=find_packages(where="src"),
+              package_dir={"": "src"},
+              python_requires=">=3.9",
+              install_requires=[
+                  "fastmcp>=2.13.0",
+                  "mcp>=1.22.0",
+                  "pydantic>=2.11.7",
+              ],
+              extras_require={
+                  "dev": [
+                      "pytest>=6.0",
+                      "pytest-asyncio>=0.18",
+                      "black>=21.0",
+                      "flake8>=3.8",
+                  ],
+                  "math": [
+                      "sympy>=1.12.0",
+                      "numpy>=1.24.0",
+                  ],
+              },
+              classifiers=[
+                  "Development Status :: 5 - Production/Stable",
+                  "Intended Audience :: Developers",
+                  "License :: OSI Approved :: MIT License",
+                  "Programming Language :: Python :: 3",
+                  "Programming Language :: Python :: 3.9",
+                  "Programming Language :: Python :: 3.10",
+                  "Programming Language :: Python :: 3.11",
+                  "Programming Language :: Python :: 3.12",
+                  "Topic :: Scientific/Engineering :: Mathematics",
+                  "Topic :: Software Development :: Libraries :: Python Modules",
+              ],
+              keywords="mcp calculator math server model-context-protocol",
+              project_urls={
+                  "Documentation": "https://github.com/tengmmvp/Calculator_MCP#readme",
+                  "Source": "https://github.com/tengmmvp/Calculator_MCP",
+                  "Tracker": "https://github.com/tengmmvp/Calculator_MCP/issues",
+              },
+          )
+          EOF
+          fi
+
+          # Update version in setup.py
+          sed -i "s/version=\"[^\"]*\"/version=\"${{ github.event.inputs.version }}\"/" setup.py
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Generate changelog based on git commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $LAST_TAG..HEAD)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)")
+          fi
+
+          # Save changelog to file
+          echo "$CHANGELOG" > CHANGELOG.md
+
+          # Set output for GitHub release
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          release_name: Calculator MCP Server v${{ github.event.inputs.version }}
+          body: |
+            ## Calculator MCP Server v${{ github.event.inputs.version }}
+
+            ### What's Changed
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Installation
+            ```bash
+            pip install calculator-mcp-server==${{ github.event.inputs.version }}
+            ```
+
+            ### Claude Desktop Configuration
+            ```json
+            {
+              "mcpServers": {
+                "calculator": {
+                  "command": "python",
+                  "args": ["-m", "calculator_mcp_server"],
+                  "description": "Mathematical calculator with tools, resources, and prompts"
+                }
+              }
+            }
+            ```
+          draft: false
+          prerelease: ${{ github.event.inputs.pre_release }}
+
+  build-and-upload:
+    runs-on: ubuntu-latest
+    needs: create-release
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
+
+      - name: Build package
+        run: |
+          python -m build
+
+      - name: Upload Release Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./dist/calculator_mcp_server-${{ github.event.inputs.version }}-py3-none-any.whl
+          asset_name: calculator_mcp_server-${{ github.event.inputs.version }}-py3-none-any.whl
+          asset_content_type: application/zip
+
+      - name: Upload Source Distribution
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./dist/calculator_mcp_server-${{ github.event.inputs.version }}.tar.gz
+          asset_name: calculator_mcp_server-${{ github.event.inputs.version }}.tar.gz
+          asset_content_type: application/gzip
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: create-release
+    if: github.event.inputs.pre_release == 'false'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: tengmmvp/calculator-mcp-server
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.event.inputs.version }}
