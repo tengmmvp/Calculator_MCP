@@ -38,23 +38,23 @@ RUN apt-get update && apt-get install -y \
 # Set work directory
 WORKDIR /app
 
-# Create requirements file
-RUN echo "fastmcp>=2.13.0" > requirements.txt && \
-    echo "pydantic>=2.11.7" >> requirements.txt && \
-    echo "hatchling" >> requirements.txt && \
-    echo "wheel" >> requirements.txt && \
-    echo "setuptools" >> requirements.txt
-
-# Install requirements first for better caching
-COPY requirements.txt ./
+# Install Python dependencies and build tools
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install "fastmcp>=2.13.0" "pydantic>=2.11.7" hatchling wheel setuptools
 
-# Copy pyproject.toml and install the package
+# Copy application files
+COPY calculator_mcp/ ./calculator_mcp/
 COPY pyproject.toml ./
 
-# Copy application code
-COPY calculator_mcp/ ./calculator_mcp/
+# Create a simple setup.py for Docker build
+RUN echo "from setuptools import setup, find_packages" > setup.py && \
+    echo "setup(" >> setup.py && \
+    echo "    name='calculator-mcp-server'," >> setup.py && \
+    echo "    version='1.0.0'," >> setup.py && \
+    echo "    packages=find_packages()," >> setup.py && \
+    echo "    install_requires=['fastmcp>=2.13.0', 'pydantic>=2.11.7']," >> setup.py && \
+    echo "    entry_points={'console_scripts': ['calculator-mcp-server=calculator_mcp.server:cli_main']}," >> setup.py && \
+    echo ")" >> setup.py
 
 # Install the package
 RUN pip install -e .
