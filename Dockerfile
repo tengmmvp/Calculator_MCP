@@ -1,5 +1,5 @@
 # Multi-stage build for Calculator MCP Server
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 # Set build arguments
 ARG VERSION=1.0.0
@@ -30,17 +30,28 @@ RUN addgroup --system app && adduser --system --group app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    g++ \
+    make \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
 WORKDIR /app
 
-# Copy requirements first for better caching
-COPY pyproject.toml ./
+# Create requirements file
+RUN echo "fastmcp>=2.13.0" > requirements.txt && \
+    echo "pydantic>=2.11.7" >> requirements.txt && \
+    echo "hatchling" >> requirements.txt && \
+    echo "wheel" >> requirements.txt && \
+    echo "setuptools" >> requirements.txt
 
-# Install Python dependencies and build tools
+# Install requirements first for better caching
+COPY requirements.txt ./
 RUN pip install --upgrade pip && \
-    pip install fastmcp>=2.13.0 pydantic>=2.11.7 hatchling
+    pip install -r requirements.txt
+
+# Copy pyproject.toml and install the package
+COPY pyproject.toml ./
 
 # Copy application code
 COPY calculator_mcp/ ./calculator_mcp/
@@ -49,7 +60,7 @@ COPY calculator_mcp/ ./calculator_mcp/
 RUN pip install -e .
 
 # Production stage
-FROM python:3.11-slim as production
+FROM python:3.11-slim AS production
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
