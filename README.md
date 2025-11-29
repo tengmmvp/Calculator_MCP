@@ -240,7 +240,7 @@ docker run -p 8080:8080 tengmmvp/calculator-mcp-server
 
 将以下配置添加到 Claude Desktop：
 
-**方法1：使用 uvx 安装的命令**
+**方法 1：使用 uvx 安装的命令**
 
 ```json
 {
@@ -254,7 +254,7 @@ docker run -p 8080:8080 tengmmvp/calculator-mcp-server
 }
 ```
 
-**方法2：使用本地路径**
+**方法 2：使用本地路径**
 
 ```json
 {
@@ -270,5 +270,6 @@ docker run -p 8080:8080 tengmmvp/calculator-mcp-server
 ```
 
 **注意**：
-- 方法1（推荐）：使用 uvx 自动管理依赖，无需手动安装
-- 方法2：请将 `YOUR_PROJECT_PATH` 替换为你克隆项目的实际路径
+
+- 方法 1（推荐）：使用 uvx 自动管理依赖，无需手动安装
+- 方法 2：请将 `YOUR_PROJECT_PATH` 替换为你克隆项目的实际路径
