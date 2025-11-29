@@ -635,11 +635,11 @@ Provide an educational explanation that helps understand both the process and th
     return prompt_content
 
 
-def main():
-    """Main entry point for the calculator MCP server."""
+def cli_main():
+    """CLI entry point for the calculator MCP server."""
     print("Starting Calculator MCP Server with FastMCP...")
     mcp.run()
 
 
 if __name__ == "__main__":
-    main()
+    cli_main()
