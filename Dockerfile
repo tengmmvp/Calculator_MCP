@@ -36,15 +36,14 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY requirements.txt pyproject.toml ./
+COPY pyproject.toml ./
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install fastmcp>=2.13.0 pydantic>=2.11.7
 
 # Copy application code
-COPY src/ ./src/
-COPY scripts/ ./scripts/
+COPY calculator_mcp/ ./calculator_mcp/
 
 # Install the package
 RUN pip install -e .
@@ -88,4 +87,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import sys; sys.exit(0)" || exit 1
 
 # Default command
-CMD ["python", "src/server.py"]
+CMD ["calculator-mcp-server"]
