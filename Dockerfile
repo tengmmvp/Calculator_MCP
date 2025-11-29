@@ -45,6 +45,8 @@ RUN pip install --upgrade pip && \
 # Copy application files
 COPY calculator_mcp/ ./calculator_mcp/
 COPY pyproject.toml ./
+COPY README.md ./
+COPY LICENSE ./
 
 # Create a simple setup.py for Docker build
 RUN echo "from setuptools import setup, find_packages" > setup.py && \
