@@ -7,7 +7,7 @@ name = "calculator-mcp-server"
 version = "1.1.0"
 description = "A complete Model Context Protocol (MCP) compliant mathematical calculation server"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "MIT License"}
 authors = [
     {name = "Calculator MCP Team", email = "admin@tengmmvp.cn"}
 ]
