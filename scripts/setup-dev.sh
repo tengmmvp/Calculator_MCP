@@ -117,7 +117,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "calculator-mcp-server"
-version = "1.0.0"
+version = "1.1.0"
 description = "A complete Model Context Protocol (MCP) compliant mathematical calculation server"
 readme = "README.md"
 license = {text = "MIT"}

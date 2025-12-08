@@ -213,7 +213,7 @@ pip install -e .
 uvx git+https://github.com/tengmmvp/Calculator_MCP
 
 # 或者指定版本
-uvx git+https://github.com/tengmmvp/Calculator_MCP@v1.0.0
+uvx git+https://github.com/tengmmvp/Calculator_MCP@v1.1.0
 
 # 或者运行命令
 uvx git+https://github.com/tengmmvp/Calculator_MCP -- calculator-mcp-server

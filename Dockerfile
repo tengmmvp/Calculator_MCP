@@ -2,7 +2,7 @@
 FROM python:3.11-slim AS builder
 
 # Set build arguments
-ARG VERSION=1.0.0
+ARG VERSION=1.1.0
 ARG BUILD_DATE
 ARG VCS_REF
 
@@ -52,7 +52,7 @@ COPY LICENSE ./
 RUN echo "from setuptools import setup, find_packages" > setup.py && \
     echo "setup(" >> setup.py && \
     echo "    name='calculator-mcp-server'," >> setup.py && \
-    echo "    version='1.0.0'," >> setup.py && \
+    echo "    version='1.1.0'," >> setup.py && \
     echo "    packages=find_packages()," >> setup.py && \
     echo "    install_requires=['fastmcp>=2.13.0', 'pydantic>=2.11.7']," >> setup.py && \
     echo "    entry_points={'console_scripts': ['calculator-mcp-server=calculator_mcp.server:cli_main']}," >> setup.py && \
