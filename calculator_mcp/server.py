@@ -2,24 +2,55 @@
 """
 Calculator MCP Server
 
-基于 FastMCP 框架构建的数学计算服务器。
+基于 FastMCP 框架构建的数学计算服务器，提供统一的数学计算接口。
+
+支持的功能：
+    - 基础算术运算（加减乘除、幂运算）
+    - 数学函数计算（三角函数、对数、平方根等）
+    - 统计分析（均值、中位数、标准差、方差）
+    - 线性方程求解（一元一次方程）
+    - 批量计算处理
+    - 多种输出格式（Markdown、JSON）
+
+模块常量：
+    CHARACTER_LIMIT: 响应内容的最大字符数限制，防止超长输出
 """
 
+# ========== 标准库导入 ==========
 import ast
+import re
 from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Union
+
+# ========== 数学与统计库导入 ==========
 import math
 import statistics
-from typing import Any, Dict, List
 
+# ========== 第三方库导入 ==========
 from fastmcp import FastMCP
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
-# 创建 FastMCP 实例
-mcp = FastMCP("Calculator MCP Server")
+# ========== MCP 服务器实例 ==========
+mcp = FastMCP("calculator_mcp")
 
+# ========== 模块级常量 ==========
+CHARACTER_LIMIT = 25000  # 最大响应字符数，防止超长输出
+
+
+# ========== 数据模型定义 ==========
 
 class CalculationResult(BaseModel):
-    """计算结果模型。"""
+    """基础计算结果数据模型。
+    
+    用于封装单次基础数学计算的结果信息。
+    
+    Attributes:
+        operation: 执行的操作类型标识
+        result: 计算得到的数值结果
+        numbers: 参与计算的原始数字列表
+        timestamp: ISO 格式的计算时间戳
+    """
     operation: str = Field(description="操作类型")
     result: float = Field(description="计算结果")
     numbers: List[float] = Field(description="参与计算的数字列表")
@@ -27,507 +58,943 @@ class CalculationResult(BaseModel):
 
 
 class StatisticsResult(BaseModel):
-    """统计结果模型。"""
+    """统计计算结果数据模型。
+    
+    用于封装统计分析计算的结果信息。
+    
+    Attributes:
+        operation: 统计操作类型（如 mean、median、stdev 等）
+        result: 统计计算得到的数值结果
+        data: 原始输入数据列表
+        count: 参与统计的数据点总数
+    """
     operation: str = Field(description="统计操作类型")
     result: float = Field(description="统计结果")
     data: List[float] = Field(description="输入数据")
     count: int = Field(description="数据点数量")
 
 
-# ========== 基础算术工具 ==========
-
-@mcp.tool()
-def calculator_add(numbers: List[float]) -> CalculationResult:
-    """执行加法运算。
-
-    Args:
-        numbers: 待相加的数字列表
-
-    Returns:
-        CalculationResult: 加法运算结果
-
-    Raises:
-        ValueError: 输入列表为空时抛出
+class ResponseFormat(str, Enum):
+    """响应输出格式枚举类型。
+    
+    定义计算结果的输出格式选项。
+    
+    Attributes:
+        MARKDOWN: 人类可读的 Markdown 格式
+        JSON: 机器可读的 JSON 结构化格式
     """
-    result = sum(numbers)
-    return CalculationResult(
-        operation="addition",
-        result=result,
-        numbers=numbers,
-        timestamp=datetime.now().isoformat()
+    MARKDOWN = "markdown"
+    JSON = "json"
+
+
+class UnifiedCalculationResult(BaseModel):
+    """统一计算结果数据模型。
+    
+    通用的计算结果封装模型，支持多种计算类型的结果表示。
+    包含严格的数据验证规则和可选的扩展字段。
+    
+    Attributes:
+        operation: 操作类型标识
+        expression: 原始输入表达式字符串
+        result: 计算结果，可以是单个数值、列表或字典
+        timestamp: ISO 格式的计算时间戳
+        steps: 可选的计算步骤说明列表
+        data: 可选的输入数据列表（统计计算时使用）
+        batch_results: 可选的批量计算结果列表
+        error: 可选的错误信息字符串
+        truncated: 响应是否因长度限制被截断
+        truncation_message: 截断时的提示信息
+    """
+    model_config = ConfigDict(
+        str_strip_whitespace=True,    # 自动去除字符串首尾空白
+        validate_assignment=True,     # 启用赋值验证
+        extra='forbid'                # 禁止额外字段
+    )
+
+    operation: str = Field(
+        description="操作类型",
+        min_length=1,
+        max_length=50
+    )
+    expression: str = Field(
+        description="原始表达式",
+        min_length=1,
+        max_length=1000
+    )
+    result: Union[float, List[float], Dict[str, Any]] = Field(
+        description="计算结果"
+    )
+    timestamp: str = Field(
+        description="计算时间戳"
+    )
+    steps: Optional[List[str]] = Field(
+        default=None,
+        description="计算步骤"
+    )
+    data: Optional[List[float]] = Field(
+        default=None,
+        description="输入数据（统计计算时）"
+    )
+    batch_results: Optional[List['UnifiedCalculationResult']] = Field(
+        default=None,
+        description="批量计算结果"
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="错误信息（如果有）",
+        max_length=500
+    )
+    truncated: Optional[bool] = Field(
+        default=False,
+        description="响应是否被截断"
+    )
+    truncation_message: Optional[str] = Field(
+        default=None,
+        description="截断提示信息"
     )
 
 
-@mcp.tool()
-def calculator_subtract(numbers: List[float]) -> CalculationResult:
-    """执行连续减法运算。
-
-    按顺序执行：第一个数 - 第二个数 - 第三个数...
-
-    Args:
-        numbers: 待相减的数字列表，至少包含一个数字
-
-    Returns:
-        CalculationResult: 减法运算结果
-
-    Raises:
-        ValueError: 输入列表为空时抛出
+class CalculateInput(BaseModel):
+    """计算工具输入参数验证模型。
+    
+    定义并验证 calculate 工具的输入参数，确保数据格式正确性。
+    
+    Attributes:
+        expression: 数学表达式或方程字符串
+        variable: 线性方程中的变量名（默认为 "x"）
+        response_format: 输出格式选择（Markdown 或 JSON）
     """
-    if not numbers:
-        raise ValueError("At least one number is required")
-    result = numbers[0]
-    for num in numbers[1:]:
-        result -= num
-    return CalculationResult(
-        operation="subtraction",
-        result=result,
-        numbers=numbers,
-        timestamp=datetime.now().isoformat()
+    model_config = ConfigDict(
+        str_strip_whitespace=True,    # 自动去除字符串首尾空白
+        validate_assignment=True,     # 启用赋值验证
+        extra='forbid'                # 禁止额外字段
     )
 
-
-@mcp.tool()
-def calculator_multiply(numbers: List[float]) -> CalculationResult:
-    """执行乘法运算。
-
-    Args:
-        numbers: 待相乘的数字列表
-
-    Returns:
-        CalculationResult: 乘法运算结果
-
-    Raises:
-        ValueError: 输入列表为空时抛出
-    """
-    result = 1.0
-    for num in numbers:
-        result *= num
-    return CalculationResult(
-        operation="multiplication",
-        result=result,
-        numbers=numbers,
-        timestamp=datetime.now().isoformat()
+    expression: str = Field(
+        ...,
+        description="数学表达式或方程。支持基础运算（+、-、*、/、**）、数学函数（sin、cos、log等）、"
+                    "统计计算（mean、stdev等）、线性方程（2x+3=7）和批量计算（用分号分隔）",
+        min_length=1,
+        max_length=1000,
+        examples=[
+            "2 + 3 * 4",
+            "sin(pi/2)",
+            "mean([1,2,3,4,5])",
+            "2x + 3 = 7",
+            "2+3; 4*5; 10/2"
+        ]
+    )
+    variable: str = Field(
+        default="x",
+        description="线性方程中的变量名（仅在解方程时使用）",
+        min_length=1,
+        max_length=10,
+        pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+    )
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.MARKDOWN,
+        description="输出格式：'markdown' 为人类可读格式，'json' 为机器可读格式"
     )
 
-
-@mcp.tool()
-def calculator_divide(numerator: float, denominator: float) -> CalculationResult:
-    """执行除法运算。
-
-    Args:
-        numerator: 被除数
-        denominator: 除数
-
-    Returns:
-        CalculationResult: 除法运算结果
-
-    Raises:
-        ValueError: 除数为零时抛出
-    """
-    if denominator == 0:
-        raise ValueError("Division by zero is not allowed")
-    result = numerator / denominator
-    return CalculationResult(
-        operation="division",
-        result=result,
-        numbers=[numerator, denominator],
-        timestamp=datetime.now().isoformat()
-    )
-
-
-@mcp.tool()
-def calculator_power(base: float, exponent: float) -> CalculationResult:
-    """执行幂运算。
-
-    Args:
-        base: 底数
-        exponent: 指数
-
-    Returns:
-        CalculationResult: 幂运算结果
-    """
-    result = base ** exponent
-    return CalculationResult(
-        operation="power",
-        result=result,
-        numbers=[base, exponent],
-        timestamp=datetime.now().isoformat()
-    )
-
-
-class MixedExpressionResult(BaseModel):
-    """混合表达式计算结果模型。"""
-    operation: str = Field(description="操作类型")
-    expression: str = Field(description="原始表达式")
-    result: float = Field(description="计算结果")
-    steps: List[str] = Field(description="计算步骤")
-    timestamp: str = Field(description="计算时间戳")
-
-
-# ========== 混合运算工具 ==========
-
-@mcp.tool()
-def calculator_evaluate_expression(expression: str) -> MixedExpressionResult:
-    """计算数学表达式，支持混合运算和数学函数。
-
-    支持的运算符：+, -, *, /, **, //, %
-    支持的函数：sin, cos, tan, log, log10, sqrt, abs, round
-    支持的常数：pi, e
-
-    Args:
-        expression: 数学表达式字符串，如 "2 + 3 * 4 - 1"
-
-    Returns:
-        MixedExpressionResult: 表达式计算结果，包含步骤说明
-
-    Raises:
-        ValueError: 表达式无效或不安全时抛出
-    """
-
-    # 安全的数学函数映射
-    safe_functions = {
-        'sin': math.sin,
-        'cos': math.cos,
-        'tan': math.tan,
-        'log': math.log,
-        'log10': math.log10,
-        'sqrt': math.sqrt,
-        'abs': abs,
-        'round': round,
-        'pow': pow,
-        'min': min,
-        'max': max,
-        'sum': sum,
-        'len': len,
-    }
-
-    # 安全的常数映射
-    safe_constants = {
-        'pi': math.pi,
-        'e': math.e,
-        'tau': math.tau,
-    }
-
-    try:
-        # 清理和验证表达式
-        expression = expression.strip()
-        if not expression:
+    @field_validator('expression')
+    @classmethod
+    def validate_expression(cls, v: str) -> str:
+        """验证表达式字段的有效性。
+        
+        确保表达式不为空且不只包含空白字符。
+        
+        Args:
+            v: 待验证的表达式字符串
+            
+        Returns:
+            去除首尾空白后的表达式字符串
+            
+        Raises:
+            ValueError: 当表达式为空或仅包含空白字符时抛出
+        """
+        if not v or not v.strip():
             raise ValueError("表达式不能为空")
+        return v.strip()
 
-        # 检查潜在的安全风险
-        dangerous_keywords = ['import', 'exec', 'eval', 'open', 'file', '__']
-        for keyword in dangerous_keywords:
-            if keyword in expression.lower():
-                raise ValueError(f"表达式包含不安全的关键字: {keyword}")
 
-        # 解析表达式
+# ========== 核心计算器类 ==========
+
+class UnifiedCalculator:
+    """统一数学计算器核心类。
+    
+    提供统一的数学计算接口，支持多种计算类型的自动识别与处理。
+    使用 AST 解析确保表达式计算的安全性，防止代码注入攻击。
+    
+    主要功能：
+        - 表达式类型自动检测
+        - 基础数学表达式求值
+        - 线性方程求解
+        - 统计计算
+        - 批量计算处理
+    
+    Attributes:
+        safe_functions: 安全的数学函数白名单字典
+        safe_constants: 安全的数学常数白名单字典
+    """
+
+    def __init__(self):
+        """初始化计算器实例。
+        
+        设置安全的函数和常数白名单，用于表达式求值时的安全检查。
+        """
+        # 安全函数白名单
+        self.safe_functions = {
+            # 基础数学函数
+            'sin': math.sin,
+            'cos': math.cos,
+            'tan': math.tan,
+            'log': math.log,
+            'log10': math.log10,
+            'sqrt': math.sqrt,
+            'abs': abs,
+            'round': round,
+            'pow': pow,
+
+            # 统计函数
+            'mean': statistics.mean,
+            'median': statistics.median,
+            'mode': statistics.mode,
+            'stdev': statistics.stdev,
+            'variance': statistics.variance,
+
+            # 聚合函数
+            'min': min,
+            'max': max,
+            'sum': sum,
+            'len': len,
+        }
+
+        # 安全常数白名单
+        self.safe_constants = {
+            'pi': math.pi,
+            'e': math.e,
+            'tau': math.tau,
+        }
+
+    def detect_expression_type(self, expression: str) -> str:
+        """自动检测表达式类型。
+        
+        根据表达式的语法特征判断其类型，用于后续选择合适的计算方法。
+        
+        检测优先级：
+            1. 线性方程（包含等号和变量）
+            2. 批量计算（包含分号）
+            3. 统计计算（包含统计函数调用）
+            4. 数学表达式（默认类型）
+        
+        Args:
+            expression: 待检测的表达式字符串
+            
+        Returns:
+            表达式类型标识，可能的值：
+                - "linear_equation": 线性方程
+                - "batch_calculation": 批量计算
+                - "statistics": 统计计算
+                - "expression": 数学表达式
+        """
+        expression = expression.strip()
+
+        # 检查是否为线性方程（包含等号和变量）
+        if '=' in expression and re.search(r'[a-zA-Z]\w*', expression):
+            return "linear_equation"
+
+        # 检查是否为批量计算（包含分号）
+        if ';' in expression:
+            return "batch_calculation"
+
+        # 检查是否为统计函数
+        stat_functions = ['mean(', 'median(', 'mode(', 'stdev(', 'variance(']
+        if any(func in expression for func in stat_functions):
+            return "statistics"
+
+        # 默认为表达式计算
+        return "expression"
+
+    def evaluate_expression(self, expression: str) -> UnifiedCalculationResult:
+        """求值数学表达式。
+        
+        使用 AST（抽象语法树）安全地解析和计算数学表达式，
+        防止代码注入攻击。支持基础运算符和白名单内的数学函数。
+        
+        Args:
+            expression: 数学表达式字符串
+            
+        Returns:
+            包含计算结果的 UnifiedCalculationResult 对象
+            
+        Note:
+            表达式中的统计函数会被自动重定向到 calculate_statistics 方法处理
+        """
+        # 检查是否包含统计函数
+        stat_functions = ['mean', 'median', 'mode', 'stdev', 'variance']
+        for func in stat_functions:
+            if f"{func}(" in expression:
+                return self.calculate_statistics(expression)
+
+        # 使用 AST 解析安全地评估表达式
         try:
             node = ast.parse(expression, mode='eval')
-        except SyntaxError as e:
-            raise ValueError(f"表达式语法错误: {str(e)}")
+            result = self._eval_node(node.body)
 
-        # 验证AST节点是否安全
-        def check_safety(node):
-            if isinstance(node, ast.Expression):
-                return check_safety(node.body)
-            elif isinstance(node, ast.BinOp):
-                return check_safety(node.left) and check_safety(node.right)
-            elif isinstance(node, ast.UnaryOp):
-                return check_safety(node.operand)
-            elif isinstance(node, ast.Constant):
-                return isinstance(node.value, (int, float))
-            elif isinstance(node, ast.Name):
-                return node.id in safe_functions or node.id in safe_constants
-            elif isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name):
-                    func_name = node.func.id
-                    if func_name not in safe_functions:
-                        return False
-                    # 检查所有参数是否安全
-                    return all(check_safety(arg) for arg in node.args)
-                return False
-            elif isinstance(node, ast.Attribute):
-                # 允许 math.xxx 格式的调用
-                if isinstance(node.value, ast.Name) and node.value.id == 'math':
-                    return True
-                return False
-            else:
-                # 拒绝其他类型的节点
-                return False
-
-        if not check_safety(node):
-            raise ValueError("表达式包含不安全的操作")
-
-        # 构建安全的执行环境
-        safe_dict = {}
-        safe_dict.update(safe_functions)
-        safe_dict.update(safe_constants)
-        safe_dict.update({
-            '__builtins__': {},
-            '__import__': None,
-        })
-
-        # 计算表达式
-        result = eval(compile(node, '<string>', 'eval'), safe_dict)
-
-        # 生成计算步骤说明
-        steps = [
-            f"原始表达式: {expression}",
-            f"解析AST节点: {ast.dump(node)}",
-            f"执行计算: {expression}",
-            f"计算结果: {result}"
-        ]
-
-        return MixedExpressionResult(
-            operation="mixed_expression",
-            expression=expression,
-            result=float(result),
-            steps=steps,
-            timestamp=datetime.now().isoformat()
-        )
-
-    except Exception as e:
-        raise ValueError(f"表达式计算失败: {str(e)}")
-
-
-@mcp.tool()
-def calculator_solve_linear_equation(equation: str, variable: str = "x") -> MixedExpressionResult:
-    """解简单的一元线性方程。
-
-    支持格式：ax + b = c 或类似形式
-
-    Args:
-        equation: 一元线性方程字符串，如 "2x + 3 = 7"
-        variable: 变量名，默认为"x"
-
-    Returns:
-        MixedExpressionResult: 方程求解结果
-
-    Raises:
-        ValueError: 方程格式无效或无法求解时抛出
-    """
-
-    try:
-        equation = equation.strip()
-        if '=' not in equation:
-            raise ValueError("方程必须包含等号 '='")
-
-        left, right = equation.split('=', 1)
-        left = left.strip()
-        right = right.strip()
-
-        # 解析左边和右边
-        def parse_side(side):
-            # 将变量替换为符号，然后计算常数项
-            # 简化版本：处理 ax + b 或 a - bx 等格式
-
-            # 移除所有空格
-            side = side.replace(' ', '')
-
-            # 查找变量项
-            import re
-            variable_pattern = f'([+-]?\\d*\\.?\\d*){re.escape(variable)}'
-            matches = re.findall(variable_pattern, side)
-
-            # 计算变量系数
-            coeff_sum = 0
-            for match in matches:
-                if match == '' or match == '+':
-                    coeff_sum += 1
-                elif match == '-':
-                    coeff_sum -= 1
-                else:
-                    coeff_sum += float(match)
-
-            # 移除变量项，计算常数
-            side_without_var = re.sub(variable_pattern, '', side)
-            side_without_var = re.sub(f'[+-]{re.escape(variable)}', '', side_without_var)
-
-            # 计算常数项
-            if side_without_var == '':
-                constant = 0
-            elif side_without_var == '+':
-                constant = 0
-            elif side_without_var == '-':
-                constant = 0
-            else:
-                try:
-                    constant = eval(side_without_var, {'__builtins__': {}}, {})
-                except:
-                    constant = 0
-
-            return coeff_sum, constant
-
-        left_coeff, left_const = parse_side(left)
-        right_coeff, right_const = parse_side(right)
-
-        # 解方程：left_coeff * x + left_const = right_coeff * x + right_const
-        # 移项：(left_coeff - right_coeff) * x = right_const - left_const
-        total_coeff = left_coeff - right_coeff
-        total_const = right_const - left_const
-
-        if abs(total_coeff) < 1e-10:
-            if abs(total_const) < 1e-10:
-                result = float('inf')  # 无穷多解
-                solution = "方程有无穷多解"
-            else:
-                result = float('nan')  # 无解
-                solution = "方程无解"
-        else:
-            result = total_const / total_coeff
-            solution = f"{variable} = {result}"
-
-        steps = [
-            f"原方程: {equation}",
-            f"解析左边: {left_coeff} * {variable} + {left_const}",
-            f"解析右边: {right_coeff} * {variable} + {right_const}",
-            f"移项: ({left_coeff} - {right_coeff}) * {variable} = {right_const} - {left_const}",
-            f"化简: {total_coeff} * {variable} = {total_const}",
-            f"求解: {solution}"
-        ]
-
-        return MixedExpressionResult(
-            operation="linear_equation",
-            expression=equation,
-            result=result,
-            steps=steps,
-            timestamp=datetime.now().isoformat()
-        )
-
-    except Exception as e:
-        raise ValueError(f"方程求解失败: {str(e)}")
-
-
-# ========== 统计工具 ==========
-
-@mcp.tool()
-def calculator_statistics(numbers: List[float], operation: str) -> StatisticsResult:
-    """执行统计运算。
-
-    支持的统计操作：mean(均值), median(中位数), mode(众数),
-    stdev(标准差), variance(方差)。
-
-    Args:
-        numbers: 用于统计的数字列表
-        operation: 统计操作类型
-
-    Returns:
-        StatisticsResult: 统计计算结果
-
-    Raises:
-        ValueError: 输入列表为空或操作类型无效时抛出
-    """
-    if not numbers:
-        raise ValueError("Numbers list cannot be empty")
-
-    if operation == "mean":
-        result = statistics.mean(numbers)
-    elif operation == "median":
-        result = statistics.median(numbers)
-    elif operation == "mode":
-        result = statistics.mode(numbers)
-    elif operation == "stdev":
-        result = statistics.stdev(numbers) if len(numbers) > 1 else 0
-    elif operation == "variance":
-        result = statistics.variance(numbers) if len(numbers) > 1 else 0
-    else:
-        raise ValueError(f"Unknown operation: {operation}")
-
-    return StatisticsResult(
-        operation=f"statistics_{operation}",
-        result=result,
-        data=numbers,
-        count=len(numbers)
-    )
-
-
-# ========== 批量计算工具 ==========
-
-@mcp.tool()
-def calculator_batch_calculations(
-    operations: List[Dict[str, Any]] = Field(
-        description="批量计算操作列表。每个操作包含：tool(工具名称：add/subtract/multiply/divide/power)、args(工具参数，如 {'numbers': [1, 2, 3]})"
-    )
-) -> List[CalculationResult]:
-    """执行批量计算。
-
-    Args:
-        operations: 包含工具名称和参数的操作列表
-
-    Returns:
-        List[CalculationResult]: 所有计算结果列表
-
-    Raises:
-        ValueError: 操作列表为空或无效时抛出
-    """
-    if not operations:
-        raise ValueError("At least one calculation is required")
-
-    results = []
-
-    for i, op in enumerate(operations):
-        if not isinstance(op, dict):
-            raise ValueError(f"Operation {i+1} must be a dictionary")
-
-        tool_name = op.get("tool")
-        args = op.get("args", {})
-
-        if not tool_name:
-            raise ValueError(f"Operation {i+1} missing 'tool' field")
-
-        try:
-            if tool_name == "add":
-                numbers = args.get("numbers", [])
-                if not numbers:
-                    raise ValueError(f"Operation {i+1}: 'add' requires 'numbers' parameter")
-                result = calculator_add(numbers)
-            elif tool_name == "subtract":
-                numbers = args.get("numbers", [])
-                if not numbers:
-                    raise ValueError(f"Operation {i+1}: 'subtract' requires 'numbers' parameter")
-                result = calculator_subtract(numbers)
-            elif tool_name == "multiply":
-                numbers = args.get("numbers", [])
-                if not numbers:
-                    raise ValueError(f"Operation {i+1}: 'multiply' requires 'numbers' parameter")
-                result = calculator_multiply(numbers)
-            elif tool_name == "divide":
-                numerator = args.get("numerator")
-                denominator = args.get("denominator")
-                if numerator is None or denominator is None:
-                    raise ValueError(f"Operation {i+1}: 'divide' requires 'numerator' and 'denominator' parameters")
-                result = calculator_divide(numerator, denominator)
-            elif tool_name == "power":
-                base = args.get("base")
-                exponent = args.get("exponent")
-                if base is None or exponent is None:
-                    raise ValueError(f"Operation {i+1}: 'power' requires 'base' and 'exponent' parameters")
-                result = calculator_power(base, exponent)
-            else:
-                raise ValueError(f"Operation {i+1}: Unknown tool '{tool_name}'")
-
-            results.append(result)
-
-        except Exception as e:
-            error_result = CalculationResult(
-                operation=f"batch_error_{tool_name}",
-                result=float('nan'),
-                numbers=args.get("numbers", []),
-                timestamp=datetime.now().isoformat()
+            return UnifiedCalculationResult(
+                operation="expression",
+                expression=expression,
+                result=result,
+                timestamp=datetime.now().isoformat(),
+                steps=[
+                    f"计算表达式: {expression}",
+                    f"结果: {result}"
+                ]
             )
-            results.append(error_result)
+        except Exception as e:
+            return UnifiedCalculationResult(
+                operation="error",
+                expression=expression,
+                result=float('nan'),
+                timestamp=datetime.now().isoformat(),
+                error=str(e)
+            )
 
-    return results
+    def solve_linear_equation(self, equation: str, variable: str) -> UnifiedCalculationResult:
+        """求解一元线性方程。
+        
+        解析并求解形如 ax + b = c 的一元线性方程。
+        支持标准形式和各种变形，自动提取系数并求解。
+        
+        Args:
+            equation: 线性方程字符串，必须包含一个等号
+            variable: 方程中的未知变量名
+            
+        Returns:
+            包含方程解的 UnifiedCalculationResult 对象，
+            包括求解步骤的详细说明
+            
+        Note:
+            方程必须是线性的（变量最高次数为1），否则可能产生错误结果
+        """
+        try:
+            # 解析方程的左右两侧
+            eq_parts = equation.split('=')
+            if len(eq_parts) != 2:
+                raise ValueError("方程必须包含一个等号")
+
+            left_side = eq_parts[0].strip()
+            right_side = eq_parts[1].strip()
+
+            # 解析右侧的值
+            right_value = self._evaluate_simple_expression(right_side)
+
+            # 解析左侧的线性表达式（形式：ax + b）
+            coeff = 0      # 变量的系数
+            constant = 0   # 常数项
+
+            # 移除空格以便解析
+            left_side = left_side.replace(' ', '')
+
+            # 使用正则表达式解析左侧表达式
+            pattern = f'([+-]?\\d*\\.?\\d*)\\s*{re.escape(variable)}|([+-]\\d+\\.?\\d*)'
+            matches = re.findall(pattern, left_side)
+
+            # 提取系数和常数项
+            for match in matches:
+                coeff_match, const_match = match
+                if coeff_match and coeff_match != '':
+                    # 这是变量项
+                    if coeff_match == '+' or coeff_match == '':
+                        coeff += 1
+                    elif coeff_match == '-':
+                        coeff -= 1
+                    else:
+                        coeff += float(coeff_match)
+                elif const_match:
+                    # 这是常数项
+                    constant += float(const_match)
+
+            # 如果第一种方法未找到变量项，尝试备用解析
+            if coeff == 0 and variable in left_side:
+                parts = re.split(r'([+-])', left_side)
+                for i in range(len(parts)):
+                    part = parts[i]
+                    if variable in part:
+                        # 提取系数
+                        coeff_str = part.replace(variable, '').replace('*', '')
+                        if coeff_str == '' or coeff_str == '+':
+                            coeff = 1
+                        elif coeff_str == '-':
+                            coeff = -1
+                        else:
+                            coeff = float(coeff_str)
+                    elif part and part not in '+-' and i > 0 and parts[i-1] in '+-':
+                        # 这是常数项
+                        sign = -1 if parts[i-1] == '-' else 1
+                        constant += sign * float(part)
+
+            # 验证方程有效性
+            if coeff == 0:
+                raise ValueError(f"方程中必须包含变量 {variable} 或其系数为零")
+
+            # 求解方程：ax + b = c => x = (c - b) / a
+            solution = (right_value - constant) / coeff
+
+            return UnifiedCalculationResult(
+                operation="linear_equation",
+                expression=equation,
+                result=solution,
+                timestamp=datetime.now().isoformat(),
+                steps=[
+                    f"原始方程: {equation}",
+                    f"解析: {coeff}{variable} + {constant} = {right_value}",
+                    f"移项: {coeff}{variable} = {right_value} - {constant}",
+                    f"求解: {variable} = {solution}"
+                ]
+            )
+        except Exception as e:
+            return UnifiedCalculationResult(
+                operation="error",
+                expression=equation,
+                result=float('nan'),
+                timestamp=datetime.now().isoformat(),
+                error=f"解方程失败: {str(e)}"
+            )
+
+    def calculate_statistics(self, expression: str) -> UnifiedCalculationResult:
+        """执行统计计算。
+        
+        解析并计算统计函数调用，支持常用统计指标。
+        输入格式为：function([data_list])
+        
+        Args:
+            expression: 统计函数调用字符串，
+                       格式示例：mean([1,2,3,4,5])
+            
+        Returns:
+            包含统计结果的 UnifiedCalculationResult 对象
+            
+        Supported Functions:
+            - mean: 算术平均值
+            - median: 中位数
+            - mode: 众数
+            - stdev: 标准差（样本标准差）
+            - variance: 方差（样本方差）
+        """
+        try:
+            # 解析统计函数调用格式：function([data_list])
+            match = re.match(r'(\w+)\(\[(.*?)\]\)', expression)
+            if match:
+                func_name = match.group(1)
+                data_str = match.group(2)
+
+                # 解析数据列表
+                data = [float(x.strip()) for x in data_str.split(',') if x.strip()]
+
+                # 执行对应的统计计算
+                if func_name == 'mean':
+                    result = statistics.mean(data)
+                elif func_name == 'median':
+                    result = statistics.median(data)
+                elif func_name == 'mode':
+                    result = statistics.mode(data)
+                elif func_name == 'stdev':
+                    result = statistics.stdev(data) if len(data) > 1 else 0
+                elif func_name == 'variance':
+                    result = statistics.variance(data) if len(data) > 1 else 0
+                else:
+                    raise ValueError(f"不支持的统计函数: {func_name}")
+
+                return UnifiedCalculationResult(
+                    operation="statistics",
+                    expression=expression,
+                    result=result,
+                    timestamp=datetime.now().isoformat(),
+                    data=data,
+                    steps=[
+                        f"统计函数: {func_name}",
+                        f"数据: {data}",
+                        f"结果: {result}"
+                    ]
+                )
+            else:
+                raise ValueError("统计函数格式不正确，应为: function([1,2,3])")
+        except Exception as e:
+            return UnifiedCalculationResult(
+                operation="error",
+                expression=expression,
+                result=float('nan'),
+                timestamp=datetime.now().isoformat(),
+                error=f"统计计算失败: {str(e)}"
+            )
+
+    def process_batch(self, expressions: str) -> UnifiedCalculationResult:
+        """处理批量计算请求。
+        
+        将多个表达式同时处理，表达式之间用分号分隔。
+        每个表达式独立计算，支持混合不同类型的表达式。
+        
+        Args:
+            expressions: 分号分隔的多个表达式字符串
+            
+        Returns:
+            包含所有计算结果的 UnifiedCalculationResult 对象，
+            result 字段为结果列表，batch_results 包含详细信息
+        """
+        try:
+            # 分割表达式，移除空行
+            expr_list = [expr.strip() for expr in expressions.split(';') if expr.strip()]
+
+            batch_results = []
+            # 递归处理每个表达式
+            for expr in expr_list:
+                expr_type = self.detect_expression_type(expr)
+                if expr_type == "linear_equation":
+                    result = self.solve_linear_equation(expr, "x")
+                elif expr_type == "statistics":
+                    result = self.calculate_statistics(expr)
+                else:
+                    result = self.evaluate_expression(expr)
+                batch_results.append(result)
+
+            # 提取所有成功计算的结果值
+            results_values = [r.result for r in batch_results if r.operation != "error"]
+
+            return UnifiedCalculationResult(
+                operation="batch_calculation",
+                expression=expressions,
+                result=results_values,
+                timestamp=datetime.now().isoformat(),
+                batch_results=batch_results,
+                steps=[
+                    f"批量处理 {len(expr_list)} 个表达式",
+                    *[f"  {i+1}. {r.expression} = {r.result}" for i, r in enumerate(batch_results)]
+                ]
+            )
+        except Exception as e:
+            return UnifiedCalculationResult(
+                operation="error",
+                expression=expressions,
+                result=[],
+                timestamp=datetime.now().isoformat(),
+                error=f"批量计算失败: {str(e)}"
+            )
+
+    def _eval_node(self, node):
+        """递归评估 AST 节点。
+        
+        安全地评估抽象语法树节点，仅支持白名单内的运算符和函数。
+        用于防止恶意代码注入和不安全的表达式执行。
+        
+        Args:
+            node: AST 节点对象
+            
+        Returns:
+            节点的计算结果（float 类型）
+            
+        Raises:
+            ValueError: 当遇到不支持的节点类型、运算符或函数时
+            
+        Supported Node Types:
+            - Constant/Num: 数值常量
+            - BinOp: 二元运算（+、-、*、/、**、//、%）
+            - UnaryOp: 一元运算（+、-）
+            - Call: 函数调用（仅白名单函数）
+            - Name: 变量引用（仅白名单常数）
+        """
+        # 处理常量节点（Python 3.8+）
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)):
+                return float(node.value)
+            else:
+                raise ValueError(f"不支持的常量类型: {type(node.value)}")
+        
+        # 兼容旧版本 Python（< 3.8）
+        elif hasattr(ast, 'Num') and isinstance(node, ast.Num):
+            return float(node.n)
+        
+        # 处理二元运算符
+        elif isinstance(node, ast.BinOp):
+            left = self._eval_node(node.left)
+            right = self._eval_node(node.right)
+
+            if isinstance(node.op, ast.Add):
+                return left + right
+            elif isinstance(node.op, ast.Sub):
+                return left - right
+            elif isinstance(node.op, ast.Mult):
+                return left * right
+            elif isinstance(node.op, ast.Div):
+                if right == 0:
+                    raise ValueError("除数不能为零")
+                return left / right
+            elif isinstance(node.op, ast.Pow):
+                return left ** right
+            elif isinstance(node.op, ast.FloorDiv):
+                if right == 0:
+                    raise ValueError("除数不能为零")
+                return left // right
+            elif isinstance(node.op, ast.Mod):
+                if right == 0:
+                    raise ValueError("除数不能为零")
+                return left % right
+            else:
+                raise ValueError(f"不支持的运算符: {type(node.op)}")
+        
+        # 处理一元运算符
+        elif isinstance(node, ast.UnaryOp):
+            operand = self._eval_node(node.operand)
+            if isinstance(node.op, ast.UAdd):
+                return +operand
+            elif isinstance(node.op, ast.USub):
+                return -operand
+            else:
+                raise ValueError(f"不支持的一元运算符: {type(node.op)}")
+        
+        # 处理函数调用
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                func_name = node.func.id
+                if func_name in self.safe_functions:
+                    args = [self._eval_node(arg) for arg in node.args]
+                    return self.safe_functions[func_name](*args)
+                else:
+                    raise ValueError(f"不支持的函数: {func_name}")
+            else:
+                raise ValueError("不支持的函数调用形式")
+        
+        # 处理变量引用（仅允许白名单常数）
+        elif isinstance(node, ast.Name):
+            if node.id in self.safe_constants:
+                return self.safe_constants[node.id]
+            else:
+                raise ValueError(f"不支持的变量或常数: {node.id}")
+        
+        # 不支持的节点类型
+        else:
+            raise ValueError(f"不支持的AST节点类型: {type(node)}")
+
+    def _evaluate_simple_expression(self, expr: str) -> float:
+        """评估简单的数学表达式。
+        
+        用于方程求解时计算等号右侧的简单表达式。
+        支持基本运算和部分数学常数。
+        
+        Args:
+            expr: 简单的数学表达式字符串
+            
+        Returns:
+            表达式的计算结果（float 类型）
+            
+        Note:
+            此方法使用受限的 eval，仅允许白名单内的名称和函数
+        """
+        try:
+            # 处理空表达式
+            if not expr or expr.strip() == '':
+                return 0.0
+
+            # 替换数学常数
+            expr = expr.replace('pi', str(math.pi))
+            expr = expr.replace('e', str(math.e))
+
+            # 限制 eval 的命名空间，仅允许安全的函数和常数
+            allowed_names = {
+                'pi': math.pi,
+                'e': math.e,
+                'sqrt': math.sqrt,
+                'abs': abs,
+                'pow': pow,
+            }
+
+            # 执行受限的 eval
+            result = eval(expr, {"__builtins__": {}}, allowed_names)
+            return float(result)
+        except:
+            # 解析失败时尝试直接转换为数字
+            try:
+                return float(expr)
+            except:
+                return 0.0
 
 
-# ========== 资源定义 ==========
+# ========== MCP 工具定义 ==========
+
+@mcp.tool(
+    name="calculate",
+    annotations={
+        "title": "统一数学计算器",
+        "readOnlyHint": True,         # 计算操作不修改系统状态
+        "destructiveHint": False,     # 非破坏性操作
+        "idempotentHint": True,       # 幂等操作，相同输入产生相同输出
+        "openWorldHint": False        # 不与外部实体交互
+    }
+)
+def calculate(
+    expression: str,
+    variable: str = "x",
+    response_format: ResponseFormat = ResponseFormat.MARKDOWN
+) -> str:
+    """
+    统一的数学计算工具：
+    
+    支持多种类型的数学运算，自动识别表达式类型并执行相应计算。
+    
+    核心功能：
+        - 基础算术运算：支持 +、-、*、/、**、//、% 运算符
+        - 数学函数：三角函数、对数、平方根等常用数学函数
+        - 统计计算：均值、中位数、标准差、方差等统计指标
+        - 线性方程求解：一元一次方程的自动求解
+        - 批量计算：多个表达式的并行处理
+    
+    支持的运算符：
+        +    加法
+        -    减法
+        *    乘法
+        /    除法
+        **   幂运算
+        //   整除
+        %    取模
+    
+    支持的函数：
+        sin, cos, tan      三角函数
+        log, log10         对数函数
+        sqrt               平方根
+        abs                绝对值
+        round              四舍五入
+        min, max, sum      聚合函数
+        mean, median       统计函数
+        mode, stdev        统计函数
+        variance           方差
+    
+    支持的常数：
+        pi      圆周率 (π)
+        e       欧拉数
+        tau     2π
+    
+    Args:
+        expression: 数学表达式、方程或批量计算字符串。
+            支持的格式：
+                - 基础运算: "2 + 3 * 4", "(10 + 5) / 3", "2**3"
+                - 数学函数: "sin(pi/2)", "log(100)", "sqrt(16) + abs(-5)"
+                - 统计计算: "mean([1,2,3,4,5])", "stdev([1,2,3,4,5])"
+                - 线性方程: "2x + 3 = 7", "3*y - 5 = 10"
+                - 批量计算: "2+3; 4*5; 10/2", "sin(pi/2); cos(0); 2**3"
+        
+        variable: 线性方程中的变量名，默认为 "x"。
+            仅在求解方程时使用，必须是有效的 Python 标识符。
+        
+        response_format: 输出格式选择。
+            - ResponseFormat.MARKDOWN: 人类可读的格式化文本（默认）
+            - ResponseFormat.JSON: 机器可读的结构化数据
+    
+    Returns:
+        根据选择的格式返回计算结果：
+        
+        Markdown 格式：
+            包含标题、表达式、结果、计算步骤和时间戳的格式化文本。
+            
+        JSON 格式：
+            包含完整计算信息的结构化 JSON 字符串。
+    
+    Examples:
+        基础计算：
+            >>> calculate("2 + 3 * 4")
+            返回包含结果 14.0 的 Markdown 格式文本
+        
+        方程求解：
+            >>> calculate("2x + 3 = 7")
+            返回包含 x = 2.0 求解过程的 Markdown 格式文本
+        
+        统计计算：
+            >>> calculate("mean([1,2,3,4,5])")
+            返回包含平均值 3.0 的 Markdown 格式文本
+        
+        批量计算：
+            >>> calculate("2+3; 4*5; 10/2")
+            返回包含批量结果 [5.0, 20.0, 5.0] 的 Markdown 格式文本
+        
+        JSON 输出：
+            >>> calculate("sin(pi/2)", response_format=ResponseFormat.JSON)
+            返回 JSON 格式的计算结果
+    
+    Note:
+        - 幂运算使用 ** 运算符，不支持 ^
+        - 统计函数的数据使用方括号：mean([1,2,3])
+        - 批量计算使用分号分隔多个表达式
+        - 方程必须包含等号，且变量默认为 x
+        - 超长响应会被自动截断，截断阈值为 CHARACTER_LIMIT
+    """
+    # 验证输入参数
+    try:
+        validated_input = CalculateInput(
+            expression=expression,
+            variable=variable,
+            response_format=response_format
+        )
+    except Exception as e:
+        error_msg = f"输入验证失败: {str(e)}"
+        if response_format == ResponseFormat.JSON:
+            import json
+            error_result = {
+                "operation": "error",
+                "expression": expression,
+                "result": float('nan'),
+                "timestamp": datetime.now().isoformat(),
+                "error": error_msg
+            }
+            return json.dumps(error_result, indent=2, ensure_ascii=False)
+        else:
+            return f"❌ **错误**: {error_msg}"
+
+    # 创建计算器实例并检测表达式类型
+    calculator = UnifiedCalculator()
+    expression_type = calculator.detect_expression_type(validated_input.expression)
+
+    # 根据表达式类型执行相应计算
+    try:
+        if expression_type == "linear_equation":
+            result = calculator.solve_linear_equation(
+                validated_input.expression,
+                validated_input.variable
+            )
+        elif expression_type == "batch_calculation":
+            result = calculator.process_batch(validated_input.expression)
+        elif expression_type == "statistics":
+            result = calculator.calculate_statistics(validated_input.expression)
+        else:
+            result = calculator.evaluate_expression(validated_input.expression)
+
+        # 根据输出格式生成响应
+        if validated_input.response_format == ResponseFormat.JSON:
+            import json
+            # 构建 JSON 结果字典
+            result_dict = {
+                "operation": result.operation,
+                "expression": result.expression,
+                "result": result.result,
+                "timestamp": result.timestamp,
+                "steps": result.steps,
+                "error": result.error
+            }
+            if result.data is not None:
+                result_dict["data"] = result.data
+            if result.batch_results is not None:
+                result_dict["batch_results"] = [
+                    {
+                        "operation": br.operation,
+                        "expression": br.expression,
+                        "result": br.result
+                    } for br in result.batch_results
+                ]
+
+            json_str = json.dumps(result_dict, indent=2, ensure_ascii=False)
+
+            # 检查字符数限制
+            if len(json_str) > CHARACTER_LIMIT:
+                # 截断结果列表
+                if isinstance(result_dict["result"], list):
+                    result_dict["result"] = result_dict["result"][:len(result_dict["result"])//2]
+                result_dict["truncated"] = True
+                result_dict["truncation_message"] = (
+                    f"响应因超过 {CHARACTER_LIMIT} 字符限制而被截断。"
+                    "对于批量计算，请考虑减少表达式数量。"
+                )
+                json_str = json.dumps(result_dict, indent=2, ensure_ascii=False)
+
+            return json_str
+
+        else:
+            # Markdown 格式输出
+            if result.error:
+                return (
+                    f"❌ **计算错误**\n\n"
+                    f"**表达式**: `{result.expression}`\n"
+                    f"**错误**: {result.error}"
+                )
+
+            # 构建 Markdown 格式的成功结果
+            lines = [f"# 🧮 计算结果", ""]
+            lines.append(f"**表达式**: `{result.expression}`")
+            lines.append(f"**操作类型**: {result.operation}")
+
+            # 根据操作类型显示不同的结果格式
+            if result.operation == "batch_calculation" and isinstance(result.result, list):
+                lines.append("")
+                lines.append("## 批量计算结果")
+                lines.append("")
+                for i, val in enumerate(result.result, 1):
+                    lines.append(f"{i}. `{result.batch_results[i-1].expression}` = **{val}**")
+            elif result.operation == "linear_equation":
+                lines.append("")
+                lines.append(f"## 方程求解结果")
+                lines.append("")
+                lines.append(f"**{validated_input.variable}** = **{result.result}**")
+            else:
+                lines.append("")
+                lines.append(f"## 结果")
+                lines.append("")
+                lines.append(f"### {result.result}")
+
+            # 显示计算步骤
+            if result.steps:
+                lines.append("")
+                lines.append("## 计算步骤")
+                lines.append("")
+                for step in result.steps:
+                    lines.append(f"- {step}")
+
+            # 显示时间戳
+            lines.append("")
+            lines.append(f"---")
+            lines.append(f"*计算时间: {result.timestamp}*")
+
+            markdown_str = "\n".join(lines)
+
+            # 检查字符数限制
+            if len(markdown_str) > CHARACTER_LIMIT:
+                # 截断内容
+                lines = lines[:len(lines)//2]
+                lines.append("")
+                lines.append("⚠️ *响应因长度限制被截断*")
+                markdown_str = "\n".join(lines)
+
+            return markdown_str
+
+    except Exception as e:
+        error_msg = f"计算失败: {str(e)}"
+        if validated_input.response_format == ResponseFormat.JSON:
+            import json
+            error_result = {
+                "operation": "error",
+                "expression": validated_input.expression,
+                "result": float('nan'),
+                "timestamp": datetime.now().isoformat(),
+                "error": error_msg
+            }
+            return json.dumps(error_result, indent=2, ensure_ascii=False)
+        else:
+            return f"❌ **错误**: {error_msg}"
+
+
+# ========== MCP 资源定义 ==========
 
 @mcp.resource("calculator://constants")
 def get_mathematical_constants() -> str:
-    """获取常用数学常数。
-
+    """获取常用数学常数列表。
+    
+    提供常用数学常数及其精确值，以 Markdown 格式呈现。
+    
     Returns:
-        str: Markdown 格式的数学常数列表
+        Markdown 格式的数学常数列表，包含常数名称和对应的数值
+    
+    Constants Included:
+        - π (Pi): 圆周率
+        - e (Euler's Number): 欧拉数
+        - φ (Golden Ratio): 黄金分割比
+        - √2: 2的平方根
+        - √3: 3的平方根
     """
     constants = {
         "π (Pi)": "3.14159265359",
@@ -546,10 +1013,20 @@ def get_mathematical_constants() -> str:
 
 @mcp.resource("calculator://formulas")
 def get_common_formulas() -> str:
-    """获取常用数学公式。
-
+    """获取常用数学公式列表。
+    
+    提供常用的数学公式，包括几何、代数等领域，以 Markdown 格式呈现。
+    
     Returns:
-        str: Markdown 格式的数学公式列表
+        Markdown 格式的数学公式列表
+    
+    Formulas Included:
+        - 圆的面积公式
+        - 三角形面积公式
+        - 一元二次方程求根公式
+        - 勾股定理
+        - 平面距离公式
+        - 直线斜率公式
     """
     formulas = [
         "Area of Circle: A = πr²",
@@ -567,17 +1044,26 @@ def get_common_formulas() -> str:
     return content
 
 
-# ========== 提示定义 ==========
+# ========== MCP 提示定义 ==========
 
 @mcp.prompt()
 def math_problem_solver(problem: str) -> str:
-    """生成数学问题的结构化解题方法。
-
+    """生成数学问题的结构化解题方法提示。
+    
+    为给定的数学问题提供系统化的解题指导框架，
+    帮助用户理解问题、选择方法、执行求解并验证结果。
+    
     Args:
-        problem: 数学问题描述
-
+        problem: 待解决的数学问题描述
+    
     Returns:
-        str: 包含结构化解题方法的提示文本
+        包含结构化解题步骤的提示文本，指导用户完成问题求解
+    
+    Prompt Structure:
+        1. 理解问题（目标、已知信息、约束条件）
+        2. 识别方法（适用概念、相关公式、推荐方法）
+        3. 逐步求解（清晰计算、推理说明、步骤验证）
+        4. 最终答案（结果陈述、合理性检查、备选方法）
     """
     prompt_content = f"""You are a mathematical problem solver. Please help solve this problem:
 
@@ -612,12 +1098,22 @@ Please provide a detailed, educational solution."""
 @mcp.prompt()
 def calculation_checker(calculation: str) -> str:
     """生成数学计算的验证和解释提示。
-
+    
+    为给定的数学计算提供验证和教育性解释，
+    帮助用户理解计算过程、原理和可能的替代方法。
+    
     Args:
         calculation: 待验证的数学计算表达式
-
+    
     Returns:
-        str: 包含计算验证和解释的提示文本
+        包含计算验证和解释的提示文本
+    
+    Prompt Content:
+        1. 验证计算正确性
+        2. 逐步分解计算过程
+        3. 解释使用的数学原理
+        4. 提供替代解法
+        5. 指出常见错误
     """
     prompt_content = f"""Please review and explain this mathematical calculation:
 
@@ -635,8 +1131,18 @@ Provide an educational explanation that helps understand both the process and th
     return prompt_content
 
 
+# ========== 主程序入口 ==========
+
 def cli_main():
-    """CLI entry point for the calculator MCP server."""
+    """命令行界面主入口函数。
+    
+    启动 Calculator MCP Server，初始化 FastMCP 服务并开始监听请求。
+    此函数作为命令行工具的入口点使用。
+    
+    Note:
+        调用 mcp.run() 会启动服务器并阻塞当前线程，
+        直到收到终止信号或发生错误。
+    """
     print("Starting Calculator MCP Server with FastMCP...")
     mcp.run()
 
